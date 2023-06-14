@@ -1,0 +1,375 @@
+---
+title: "Index"
+author: "Bela Szlovicsak"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(broom)
+library(easystats)
+```
+
+
+
+```{r}
+# Get the Data
+
+# Read in with tidytuesdayR package 
+# This loads the readme and all the datasets for the week of interest
+
+
+tuesdata <- tidytuesdayR::tt_load('2022-01-25')
+
+
+ratings <- tuesdata$ratings
+details <- tuesdata$details
+```
+
+
+# EDA
+
+Explore the Boardgames dataset, visualize some possible interesting variables.
+The goal to estimate will probably be avarage rating
+
+```{r}
+str(ratings)
+str(details)
+```
+
+This is a lot of detail. A whole bunch of variables will not be of interest, for example: url, thumbnail, description, num (not identical in the two dataframes), some of the playing time variables, Expansion (is not based on id, maybe if we transform it to an indicator variable it could be useful). I will check to other variables to see if there is anything interesting to observe.
+Currently we have a huge amount of boardgames, but some might have really low number of ratings. These I will filter out.
+
+```{r}
+summary(ratings)
+```
+
+
+```{r}
+ratings %>% 
+  filter(users_rated >= 100) %>% 
+  summary()
+```
+
+Filtering out games with less than a 100 ratings help this variable become more reliable, while we keep averages similar to  the original.
+Regarding creation year: some games were made before the 90's which is the beginning of the modern board game era, these games will be removed.
+
+
+```{r}
+bgames <- details %>% 
+  left_join(ratings, by = "id") %>% 
+  #Get rid of some unnecessary variables
+  #Implementation only contains other names, family is not interesting either
+  select(-c(num.x, primary, description, num.y, url, thumbnail,
+            boardgamefamily, boardgameimplementation))
+```
+
+## Popular mechanics and categories
+
+Get out popular mechanics and categories to see if their presence is significant
+
+```{r}
+#Keep popular mechanics in a vector for easier use later
+pop_mechanic <- bgames %>%
+  filter(users_rated >= 100, !is.na(boardgamemechanic)) %>% 
+  mutate(boardgamemechanic = str_extract_all(boardgamemechanic, "\'([^\']*)\'")) %>%
+  unnest_longer(boardgamemechanic) %>%
+  count(boardgamemechanic) %>% 
+  slice_max(order_by = n, n = 25) %>% 
+  pull(boardgamemechanic)
+pop_mechanic
+```
+
+Check if having more popular mechanics in a game improves scores. 
+These are somewhat improved, but higher numbers might need binning on account of low counts.
+
+
+```{r}
+bgames %>%
+  filter(users_rated >= 100, !is.na(boardgamemechanic)) %>% 
+  mutate(boardgamemechanic = str_extract_all(boardgamemechanic, "\'([^\']*)\'")) %>%
+  unnest_longer(boardgamemechanic) %>%
+  filter(boardgamemechanic %in% pop_mechanic) %>% 
+  ggplot(aes(average)) +
+  geom_histogram(bins=10) +
+  facet_wrap(~boardgamemechanic, scales = "free_y") +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(title = "Average BGG rating and  popular mechanics")
+```
+
+
+```{r}
+bgames %>% 
+  filter(users_rated >= 100, !is.na(boardgamemechanic)) %>% 
+  mutate(boardgamemechanic = str_extract_all(boardgamemechanic, "\'([^\']*)\'")) %>% 
+  unnest_longer(boardgamemechanic) %>% 
+  mutate(mech_pop = ifelse(boardgamemechanic %in% pop_mechanic, 1, 0)) %>% 
+  group_by(id) %>% 
+  summarise(score = mean(average), n_popular = sum(mech_pop)) %>% 
+  ggplot(aes(score)) +
+  geom_histogram(bins=10) +
+  facet_wrap(~n_popular, scales = "free_y") +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(title = "Average BGG rating and the number of popular mechanics")
+```
+
+Most mechanics don't effect score distributions, however the number of popular mechanics do effect them.
+
+Now do the same for popular categories
+```{r}
+#Keep popular categories in a vector for easier use later
+pop_categ <- bgames %>%
+  filter(users_rated >= 100, !is.na(boardgamecategory)) %>% 
+  mutate(boardgamecategory = str_extract_all(boardgamecategory, "\'([^\']*)\'")) %>%
+  unnest_longer(boardgamecategory) %>%
+  count(boardgamecategory) %>% 
+  slice_max(order_by = n, n = 15) %>% 
+  pull(boardgamecategory)
+pop_categ
+```
+
+```{r}
+bgames %>%
+  filter(users_rated >= 100, !is.na(boardgamecategory)) %>% 
+  mutate(boardgamecategory = str_extract_all(boardgamecategory, "\'([^\']*)\'")) %>%
+  unnest_longer(boardgamecategory) %>%
+  filter(boardgamecategory %in% pop_categ) %>% 
+  ggplot(aes(average)) +
+  geom_histogram(bins=10) +
+  facet_wrap(~boardgamecategory, scales = "free_y") +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(title = "Average BGG rating and  popular categories")
+```
+ 
+
+
+```{r}
+bgames %>% 
+  filter(users_rated >= 100, !is.na(boardgamecategory)) %>% 
+  mutate(boardgamecategory = str_extract_all(boardgamecategory,
+                                             "\'([^\']*)\'")) %>% 
+  unnest_longer(boardgamecategory) %>% 
+  mutate(categ_pop = ifelse(boardgamecategory %in% pop_categ, 1, 0)) %>% 
+  group_by(id) %>% 
+  summarise(score = mean(average), n_popular = sum(categ_pop)) %>% 
+  ggplot(aes(score)) +
+  geom_histogram(bins=10) +
+  facet_wrap(~n_popular, scales = "free_y") +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(title = "Average BGG rating and the number of popular categories")
+```
+
+Most categories don't effect score distributions, however the number of popular categories do effect them.
+
+
+## Other possible predictors
+
+```{r}
+bgames %>% 
+  #Remove games that take up close to a day or more time
+  #Also remove games shorter than a minute
+  filter(playingtime < 1000, users_rated >= 100,
+         playingtime >= 1) %>%
+  ggplot(aes(log10(playingtime), average)) +
+  geom_jitter() +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(title = "Average score and game length") +
+  xlab(label = "Base 10 logarithm of game length in minutes") +
+  scale_x_continuous(limits = c(0, 4)) +
+  scale_y_continuous(limits = c(0, 10))
+```
+Interestingly higher scored games tend to be longer
+
+
+
+
+See if minimum player count could effect scores.
+```{r}
+bgames %>% 
+  filter(playingtime < 1000, users_rated >= 100) %>% 
+  ggplot(aes(average)) +
+  geom_histogram(bins = 20) +
+  facet_wrap(~minplayers, scales = "free_y") +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(title = "Average score and minimum player count") +
+  xlab(label = "Average score")
+```
+They don't seem to significantly change scores.
+
+
+
+See if the minimum age has some connection with scores
+
+```{r}
+bgames %>% 
+  filter(playingtime < 1000, users_rated >= 100) %>% 
+  mutate(score = round(average)) %>% 
+  ggplot(aes(minage)) +
+  geom_bar() +
+  facet_wrap(~score, scales = "free_y") +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(title = "Rounded score and Minimum Age") +
+  xlab(label = "Minimum age")
+```
+
+There is no evident connection between these variables, but it still might be worthwile to check out the effect of minimum age using statistics later.
+
+
+
+```{r}
+bgames %>% 
+  filter(playingtime < 1000, users_rated >= 100) %>% 
+  mutate(score = round(average),
+         #Want and wish mean basically the same: the given person wants to own the game
+         need = wanting + wishing) %>% 
+  ggplot(aes(log10(need))) +
+  geom_histogram(bins = 20) +
+  facet_wrap(~score, scales = "free_y") +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(title = "Rounded score and People looking for the game") +
+  xlab(label = "Number of people looking for the game")
+```
+
+Clearly more people want to own higher scored games. It seems tempting to use this variable in the estimation of scores, however it's probably the other way around, and higher scores lead to a higher number of people wanting the game.
+
+# Create a cleaner tibble for modelbuilding
+
+I will implement some useful modifications to make it easier to test hypotheses.
+I will create a popular mechanic and a popular category variable to see how well the games match these. I will also filter out too short, too long games and games with too few ratings. I will also remove games which were made before 1990, the approximate beggining of modern board games.
+I will also check if artist or designers have a big effect, from them the top 5 will be kept, the others will be put into an Other factor.
+
+
+First get how many popular categories and mechanics are there in different games
+```{r}
+categ_pop_num <-  bgames %>%
+  mutate(boardgamecategory = str_extract_all(boardgamecategory,
+                                             "\'([^\']*)\'")) %>% 
+  unnest_longer(boardgamecategory) %>% 
+  mutate(categ_pop = ifelse(boardgamecategory %in% pop_categ, 1, 0),
+         ) %>%
+  group_by(id) %>% 
+  summarise(categ_pop = sum(categ_pop)) %>% 
+  filter(!is.na(categ_pop))
+  
+
+mech_pop_num <- bgames %>%
+  mutate(boardgamemechanic = str_extract_all(boardgamemechanic,
+                                             "\'([^\']*)\'")) %>%
+  unnest_longer(boardgamemechanic) %>% 
+  mutate(mech_pop = ifelse(boardgamemechanic %in% pop_mechanic, 1, 0)) %>% 
+  group_by(id) %>% 
+  summarise(mech_pop = sum(mech_pop)) %>% 
+  filter(!is.na(mech_pop))
+```
+
+
+
+```{r}
+bgg <- bgames %>%
+  left_join(categ_pop_num, by = "id") %>% 
+  left_join(mech_pop_num, by = "id") %>%
+  filter(playingtime < 1000, 
+         users_rated >= 100,
+         playingtime >= 1,
+         yearpublished >= 1990,
+         yearpublished <= 2022,
+         !is.na(boardgamecategory),
+         !is.na(boardgamemechanic),
+         !is.na(minage),
+         !is.na(yearpublished),
+         !is.na(playingtime),
+         !is.na(boardgamedesigner),
+         !is.na(boardgameartist),
+         !is.na(average)) %>% 
+  select(id, yearpublished, minplayers, 
+         playingtime, minage, boardgamedesigner, 
+         boardgameartist, wanting, wishing, average,
+         categ_pop, mech_pop) %>% 
+  mutate(boardgamedesigner =  fct_lump_n(boardgamedesigner, n= 6),
+         boardgameartist = fct_lump_n(boardgameartist, n = 6)
+         ) %>% 
+  mutate(boardgamedesigner = fct_other(boardgamedesigner, 
+                                      drop = c("['(Uncredited)']")),
+         boardgameartist = fct_other(boardgameartist, 
+                                      drop = c("['(Uncredited)']")),
+         n_need = wanting + wishing,
+         #modify years to start at 0, this makes it more useable for the regression, interpretation is: how many years passed sincs 1990 to the making of this game
+         yearpublished = yearpublished - min(yearpublished)) %>% 
+  mutate(boardgamedesigner = fct_infreq(boardgamedesigner),
+         boardgameartist = fct_infreq(boardgameartist))
+```
+
+
+
+# Statistical model for average game scores
+
+I think that minimum age, Publishing year, Game length, number of popular mechanics and categories, and the person of the designer/artist  could have an effect on the BGG scores of boardgames. Here i will test this using a linear regression. 
+
+```{r}
+
+bgg_model <- lm(average ~ yearpublished + minage + 
+                          I(log10(playingtime)) +
+                          boardgamedesigner +
+                          boardgameartist +
+                          categ_pop +
+                          mech_pop,
+                data = bgg)
+
+null_model <- lm(average ~ 1, 
+                 data = bgg_model$model)
+```
+
+Compare the model to the null
+```{r}
+AIC(null_model)
+AIC(bgg_model)
+anova(null_model, bgg_model)
+```
+
+
+Based on the F test and the AIC scores the more complex model is better at describing the data.
+
+```{r}
+r2(bgg_model)
+```
+The R-squared indicates that the predictive power of the model could be furthe improved
+
+See coefficients:
+```{r}
+tidy(bgg_model) %>% 
+  DT::datatable(
+  extensions = 'FixedColumns',
+  options = list(
+    scrollX = TRUE,
+    fixedColumns = TRUE
+  )
+)
+```
+All theorized variebles have a significant effect, except minimum age. Year, Playing time, number of popular mechanics and categories increase the score. Among designers only Reiner Knizia has a significant effect and his scores are higher. That is he makes a great amount of popular games. Among artists only Harald Lieske has a significant effect, but he decreases scores. That is if a game had art made by him it has probably lower scores.
+
+
+```{r}
+
+check_model(bgg_model)
+```
+
+The model seems adequate. Checks are right and there is no great outlier. Linearity is not the best, but mostly acceptable.
+
+
+
+Based on this, if one wants to make a high scoring game they have to make it as long as possible, release it as late as possible, put in as many popular mechanics as possible, fuse as many popular categories as possible, hire Reiner Knizia, and avoid hiring Harald Lieske.
+This is of course, a joke. But mechanics and categories can really become popular and copied by others wanting success. 
+
